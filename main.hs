@@ -110,9 +110,9 @@ toNumber _ = Left "Expected a number"
 
 toBool :: Val -> Bool
 toBool (List []) = False
-toBool (Atom "t") = True
 toBool (Atom "nil") = False
-toBool _ = False
+toBool (Atom "t") = True
+toBool _ = True
 
 -- eval
 eval :: Variables -> Val -> Either String (Val, Variables)
