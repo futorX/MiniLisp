@@ -1,0 +1,262 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage[russian]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath, amssymb}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{geometry}
+\geometry{top=2cm, bottom=2cm, left=2.5cm, right=2.5cm}
+
+\lstset{
+    language=Haskell,
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue},
+    commentstyle=\color{green!50!black},
+    stringstyle=\color{red},
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    stepnumber=1,
+    breaklines=true,
+    tabsize=2,
+    showspaces=false,
+    showstringspaces=false
+}
+
+\title{Интерпретатор Mini-Lisp на Haskell \\[0.3cm]
+\large }
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{Формальная постановка задачи}
+
+\subsection{Синтаксис языка}
+
+\begin{verbatim}
+<expr>      ::= <number> | <atom> | <list> | <quoted>
+
+<number>    ::= '-'? <digit>+
+<digit>     ::= '0'..'9'
+
+<atom>      ::= <letter> <atom-rest>*
+<atom-rest> ::= <letter> | <digit> | '-' | '_' | '?' | '!'
+<letter>    ::= 'a'..'z' | 'A'..'Z' | '+' | '-' | '*' | '/' | '=' | '<' | '>'
+
+<list>      ::= '(' <expr>* ')'                    (* обычный список *)
+              | '(' <expr> '.' <expr> ')'          (* точечная пара *)
+
+<quoted>    ::= '\'' <expr>
+
+<expr>      ::= <number> | <atom> | <list> | <quoted>
+\end{verbatim}
+
+\subsection{Семантика}
+
+\subsubsection{Типы данных}
+\begin{itemize}
+    \item \texttt{Atom String} — атом (символьное имя)
+    \item \texttt{Number Integer} — целое число
+    \item \texttt{List [Val]} — обычный список
+    \item \texttt{DottedPair Val Val} — точечная пара
+\end{itemize}
+
+\subsubsection{Встроенные константы}
+\begin{itemize}
+    \item \texttt{t} — логическая истина
+    \item \texttt{nil} или \texttt{()} — пустой список (логическая ложь)
+\end{itemize}
+
+\subsubsection{Специальные формы}
+\begin{itemize}
+    \item \texttt{(quote <expr>)} — возвращает выражение без вычисления
+    \item \texttt{(if <cond> <then> <else>)} — условное выражение
+    \item \texttt{(define <var> <expr>)} — определение переменной
+\end{itemize}
+
+\subsubsection{Встроенные функции}
+\begin{itemize}
+    \item \texttt{(car <list>)} — первый элемент списка или точечной пары
+    \item \texttt{(cdr <list>)} — хвост списка или второй элемент пары
+    \item \texttt{(cons <x> <y>)} — конструирование пары или списка
+    \item \texttt{(eq <x1> <x2>)} — сравнение на равенство
+    \item \texttt{(+ <x1> <x2>)}, \texttt{(- <x1> <x2>)}, \texttt{(* <x1> <x2>)}, \texttt{(/ <x1> <x2>)} — арифметические операции
+    \item \texttt{(< <x1> <x2>)}, \texttt{(> <x1> <x2>)}, \texttt{(= <x1> <x2>)} — сравнение чисел
+\end{itemize}
+
+\section{Описание алгоритмов}
+
+\subsection{Лексический анализ и парсинг}
+
+Для разбора используется библиотека \texttt{Parsec} — реализация комбинаторных парсеров.
+
+\subsubsection{Алгоритм парсинга чисел}
+\begin{enumerate}
+    \item Опционально обрабатываем знак минуса (только если после него идёт цифра)
+    \item Парсим одну или более цифр
+    \item Преобразуем строку в целое число
+    \item Применяем знак (если был)
+\end{enumerate}
+
+\subsubsection{Алгоритм парсинга атомов}
+\begin{enumerate}
+    \item Первый символ: буква или один из символов \texttt{+-*/=<>}
+    \item Последующие символы: буквы, цифры или \texttt{-\_?!}
+    \item Формируем атом с полученным именем
+\end{enumerate}
+
+\subsubsection{Алгоритм парсинга списков}
+Парсер использует стратегию с возвратом (\texttt{try}):
+
+\begin{enumerate}
+    \item Пробуем распознать пустой список \texttt{()}
+    \item Если не пустой — пробуем распознать точечную пару \texttt{(a . b)}
+    \item Иначе — распознаём обычный список \texttt{(a b c ...)}
+\end{enumerate}
+
+Для обычного списка:
+\begin{enumerate}
+    \item Читаем открывающую скобку
+    \item Парсим первое выражение
+    \item Повторяем парсинг следующих выражений (ноль или более)
+    \item Читаем закрывающую скобку
+\end{enumerate}
+
+\subsubsection{Алгоритм парсинга quoted-выражений}
+\begin{enumerate}
+    \item Распознаём символ \texttt{'}
+    \item Парсим следующее выражение
+    \item Преобразуем в \texttt{(quote <expr>)}
+\end{enumerate}
+
+\subsection{Интерпретация}
+
+\subsubsection{Управление переменными}
+\begin{itemize}
+    \item \textbf{getVar} — линейный поиск переменной в списке окружения (ассоциативном списке)
+    \item \textbf{setVar} — добавление новой пары (имя, значение) в начало окружения (реализует динамическую область видимости)
+    \item Запрещено переопределение встроенных констант \texttt{t}, \texttt{nil}, \texttt{T}, \texttt{NIL}
+\end{itemize}
+
+\subsubsection{Приведение к логическому значению}
+Функция \texttt{toBool}:
+\begin{itemize}
+    \item Пустой список \texttt{(List [])} → \texttt{False}
+    \item Атом \texttt{"nil"} → \texttt{False}
+    \item Атом \texttt{"t"} → \texttt{True}
+    \item Любое другое значение → \texttt{False}
+\end{itemize}
+
+\subsubsection{Алгоритм eval (вычисление выражения)}
+Функция \texttt{eval :: Variables -> Val -> Either String (Val, Variables)}:
+
+\begin{enumerate}
+    \item \textbf{Число} — возвращается без изменений
+    \item \textbf{Атом (переменная)} — ищется в окружении; если не найдена — ошибка
+    \item \textbf{Список} — анализируется первый элемент:
+    \begin{itemize}
+        \item \texttt{quote} — возвращает второй аргумент без вычисления
+        \item \texttt{if} — вычисляется условие; в зависимости от истинности вычисляется одна из ветвей
+        \item \texttt{define} — вычисляется выражение, переменная добавляется в окружение
+        \item \texttt{car}, \texttt{cdr}, \texttt{cons}, \texttt{eq} — вычисляются аргументы, затем выполняется операция
+        \item \texttt{+}, \texttt{-}, \texttt{*}, \texttt{/}, \texttt{<}, \texttt{>}, \texttt{=} — вычисляются оба аргумента (с последовательным обновлением окружения), преобразуются к числам, выполняется операция
+        \item \textit{иначе} — ошибка (в данной реализации функции не могут быть определены пользователем)
+    \end{itemize}
+    \item \textbf{Пустой список} — возвращается пустой список
+\end{enumerate}
+
+\subsubsection{Алгоритм работы с точечными парами}
+\begin{itemize}
+    \item \texttt{car} от \texttt{DottedPair x y} → \texttt{x}
+    \item \texttt{cdr} от \texttt{DottedPair x y} → \texttt{y}
+    \item \texttt{cons}:
+    \begin{itemize}
+        \item Если второй аргумент — \texttt{List ys}, результат — \texttt{List (x:ys)}
+        \item Иначе — \texttt{DottedPair x y}
+    \end{itemize}
+\end{itemize}
+
+\subsection{REPL}
+
+Алгоритм работы REPL:
+\begin{enumerate}
+    \item Вывод \texttt{lisp>}
+    \item Чтение строки ввода
+    \item Проверка на команду \texttt{exit}
+    \item Парсинг строки в \texttt{Val}
+    \item Вычисление выражения в текущем окружении
+    \item Вывод результата
+    \item Обновление окружения (при \texttt{define})
+    \item Повторение цикла
+\end{enumerate}
+
+\subsection{Обработка ошибок}
+Все ошибки обрабатываются с использованием типа \texttt{Either String a}:
+\begin{itemize}
+    \item Ошибки парсинга — сообщения от Parsec
+    \item Ошибки выполнения — сообщения с описанием проблемы:
+    \begin{itemize}
+        \item Неопределённая переменная
+        \item Ожидание числа
+        \item Деление на ноль
+        \item Переопределение встроенной константы
+        \item Некорректный аргумент для \texttt{car}/\texttt{cdr}
+    \end{itemize}
+\end{itemize}
+
+\section{Структура исходного кода}
+
+Исходный код организован следующим образом:
+
+\begin{lstlisting}
+import Data.Char (isAlphaNum, isDigit)
+import Text.Parsec
+import Text.Parsec.String (Parser)
+
+data Val = Atom String | Number Integer | List [Val] | DottedPair Val Val
+  deriving (Show, Eq)
+
+type Variables = [(String, Val)]
+
+-- === Парсер ===
+whiteSpace :: Parser ()
+atomParser :: Parser Val
+numberParser :: Parser Val
+emptyListParser :: Parser Val
+dottedPairParser :: Parser Val
+regularListParser :: Parser Val
+listParser :: Parser Val
+quotedParser :: Parser Val
+parseExpr :: Parser Val
+parseLisp :: String -> Either ParseError Val
+
+-- === Управление переменными ===
+isForbiddenName :: String -> Bool
+getVar :: String -> Variables -> Maybe Val
+setVar :: String -> Val -> Variables -> Either String Variables
+
+-- === Вспомогательные функции ===
+toNumber :: Val -> Either String Integer
+toBool :: Val -> Bool
+
+-- === Интерпретатор ===
+eval :: Variables -> Val -> Either String (Val, Variables)
+
+-- === REPL ===
+repl :: Variables -> IO ()
+initialEnv :: Variables
+main :: IO ()
+\end{lstlisting}
+
+\subsection{Примечания по реализации}
+\begin{itemize}
+    \item Парсеры используют комбинатор \texttt{try} для реализации возврата при разборе альтернатив
+    \item Пробелы игнорируются с помощью \texttt{whiteSpace}
+    \item Окружение передаётся явно через аргумент функции \texttt{eval}
+    \item Каждая операция возвращает новое окружение на случай изменений
+    \item При бинарных операциях окружение последовательно обновляется при вычислении каждого аргумента
+\end{itemize}
+
+\end{document}
