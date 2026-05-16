@@ -1,4 +1,3 @@
-import Data.Char (isAlphaNum, isDigit)
 import Text.Parsec
 import Text.Parsec.String (Parser)
 
